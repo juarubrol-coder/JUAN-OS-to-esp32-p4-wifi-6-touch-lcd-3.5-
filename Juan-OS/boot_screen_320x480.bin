@@ -1,1 +1,228 @@
-dummy_placeholder_binary_content_for_image
+#!/usr/bin/env python3
+"""
+Generador de imagen BIN RGB565 para ESP32-P4 WiFi-6 Touch LCD 3.5"
+WeAct Studio - Resolución HVGA: 480x320
+
+Este script convierte imágenes PNG/JPG a formato binario RGB565
+compatible con pantallas ILI9488/ILI9486 en interfaz paralela RGB.
+
+Uso:
+    python3 weact_lcd_converter.py imagen.png salida.bin
+    python3 weact_lcd_converter.py --default salida.bin
+"""
+
+from PIL import Image, ImageDraw, ImageFont
+import struct
+import sys
+import argparse
+import math
+import io
+
+# Resolución nativa de la pantalla WeAct 3.5" HVGA
+LCD_WIDTH = 480
+LCD_HEIGHT = 320
+
+
+def rgb888_to_rgb565(r, g, b):
+    """Convierte color RGB888 a RGB565 (formato de 16 bits para LCD)"""
+    r5 = (r >> 3) & 0x1F
+    g6 = (g >> 2) & 0x3F
+    b5 = (b >> 3) & 0x1F
+    return (r5 << 11) | (g6 << 5) | b5
+
+
+def convert_image_to_bin(input_image, output_bin, width=LCD_WIDTH, height=LCD_HEIGHT):
+    """Convierte una imagen a formato binario RGB565"""
+    try:
+        print(f"[*] Cargando imagen: {input_image}")
+        img = Image.open(input_image).convert("RGB")
+        orig_size = img.size
+        
+        print(f"[*] Tamaño original: {orig_size[0]}x{orig_size[1]}")
+        print(f"[*] Redimensionando a: {width}x{height}")
+        
+        # Redimensionar a la resolución de la pantalla
+        img = img.resize((width, height), Image.Resampling.LANCZOS)
+        
+        # Crear buffer binario
+        bin_data = bytearray()
+        pixels = img.load()
+        
+        print(f"[*] Convirtiendo a RGB565...")
+        for y in range(height):
+            for x in range(width):
+                r, g, b = pixels[x, y]
+                rgb565 = rgb888_to_rgb565(r, g, b)
+                
+                # Formato little-endian (LSB primero)
+                bin_data.append(rgb565 & 0xFF)
+                bin_data.append((rgb565 >> 8) & 0xFF)
+            
+            # Mostrar progreso cada 10 líneas
+            if (y + 1) % 32 == 0:
+                progress = ((y + 1) / height) * 100
+                print(f"[→] Progreso: {progress:.1f}% ({y+1}/{height})")
+        
+        # Guardar archivo binario
+        with open(output_bin, 'wb') as f:
+            f.write(bin_data)
+        
+        size_kb = len(bin_data) / 1024.0
+        print(f"\n[✓] Archivo BIN generado exitosamente!")
+        print(f"[✓] Archivo: {output_bin}")
+        print(f"[✓] Tamaño: {len(bin_data)} bytes ({size_kb:.2f} KB)")
+        print(f"[✓] Resolución: {width}x{height} pixels")
+        print(f"[✓] Formato: RGB565 (16 bits por píxel)")
+        print(f"[✓] Compatible con: ILI9488/ILI9486 (WeAct 3.5\" LCD)")
+        
+        return True
+        
+    except FileNotFoundError:
+        print(f"[ERROR] No se encontró la imagen: {input_image}")
+        return False
+    except Exception as e:
+        print(f"[ERROR] {str(e)}")
+        return False
+
+
+def generate_default_image(output_bin, width=LCD_WIDTH, height=LCD_HEIGHT):
+    """Genera una imagen de ejemplo para la pantalla"""
+    print(f"[*] Generando imagen de ejemplo para {width}x{height}...")
+    
+    img = Image.new("RGB", (width, height), (10, 20, 40))
+    draw = ImageDraw.Draw(img)
+    
+    # Fondo degradado oceánico
+    for y in range(height):
+        t = y / max(1, height - 1)
+        r = int(15 + 70 * t)
+        g = int(40 + 160 * t)
+        b = int(60 + 160 * t)
+        draw.line((0, y, width, y), fill=(r, g, b))
+    
+    # Efecto de ondas/agua
+    for wave in range(16):
+        y0 = 20 + wave * 18
+        for x in range(0, width, 4):
+            yy = y0 + int(math.sin(x * 0.015 + wave * 0.5) * 8)
+            if 0 <= yy < height:
+                draw.line((x, yy, x + 3, yy + 1), fill=(100, 210, 230), width=1)
+    
+    # Panel del board
+    draw.rounded_rectangle((20, 80, width - 20, height - 60), radius=20, fill=(15, 60, 90))
+    draw.rounded_rectangle((25, 85, width - 25, height - 65), radius=18, fill=(8, 40, 70))
+    
+    # Texto principal
+    try:
+        font_big = ImageFont.truetype("DejaVuSans-Bold.ttf", 36)
+        font_small = ImageFont.truetype("DejaVuSans.ttf", 18)
+        font_tiny = ImageFont.truetype("DejaVuSans.ttf", 14)
+    except:
+        font_big = font_small = font_tiny = ImageFont.load_default()
+    
+    text1 = "JUAN-OS"
+    text2 = "ESP32-P4 WiFi-6"
+    text3 = "480×320 HVGA"
+    
+    # Centrar texto
+    bbox1 = draw.textbbox((0, 0), text1, font=font_big)
+    tx1 = (width - (bbox1[2] - bbox1[0])) // 2
+    
+    bbox2 = draw.textbbox((0, 0), text2, font=font_small)
+    tx2 = (width - (bbox2[2] - bbox2[0])) // 2
+    
+    bbox3 = draw.textbbox((0, 0), text3, font=font_tiny)
+    tx3 = (width - (bbox3[2] - bbox3[0])) // 2
+    
+    draw.text((tx1, 120), text1, fill=(200, 240, 255), font=font_big)
+    draw.text((tx2, 165), text2, fill=(120, 220, 240), font=font_small)
+    draw.text((tx3, 200), text3, fill=(150, 200, 230), font=font_tiny)
+    
+    # Guiones decorativos
+    draw.line((60, 110, width - 60, 110), fill=(80, 200, 220), width=2)
+    draw.line((60, 230, width - 60, 230), fill=(80, 200, 220), width=2)
+    
+    # Guardar imagen de referencia
+    png_path = output_bin.replace(".bin", ".png")
+    img.save(png_path)
+    print(f"[✓] Imagen de ejemplo: {png_path}")
+    
+    # Convertir a BIN
+    convert_image_to_bin(png_path, output_bin, width, height)
+
+
+def generate_rgb565_binary(width=LCD_WIDTH, height=LCD_HEIGHT):
+    """Genera un binario RGB565 directamente (sin imagen intermediaria)"""
+    print(f"[*] Generando binario RGB565 de ejemplo: {width}x{height}...")
+    
+    img = Image.new("RGB", (width, height), (10, 20, 40))
+    draw = ImageDraw.Draw(img)
+    
+    # Fondo degradado oceánico
+    for y in range(height):
+        t = y / max(1, height - 1)
+        r = int(15 + 70 * t)
+        g = int(40 + 160 * t)
+        b = int(60 + 160 * t)
+        draw.line((0, y, width, y), fill=(r, g, b))
+    
+    # Efecto de ondas
+    for wave in range(16):
+        y0 = 20 + wave * 18
+        for x in range(0, width, 4):
+            yy = y0 + int(math.sin(x * 0.015 + wave * 0.5) * 8)
+            if 0 <= yy < height:
+                draw.line((x, yy, x + 3, yy + 1), fill=(100, 210, 230), width=1)
+    
+    # Panel
+    draw.rounded_rectangle((20, 80, width - 20, height - 60), radius=20, fill=(15, 60, 90))
+    draw.rounded_rectangle((25, 85, width - 25, height - 65), radius=18, fill=(8, 40, 70))
+    
+    # Convertir a RGB565
+    bin_data = bytearray()
+    pixels = img.load()
+    
+    for y in range(height):
+        for x in range(width):
+            r, g, b = pixels[x, y]
+            rgb565 = rgb888_to_rgb565(r, g, b)
+            bin_data.append(rgb565 & 0xFF)
+            bin_data.append((rgb565 >> 8) & 0xFF)
+    
+    print(f"[✓] Binario generado: {len(bin_data)} bytes ({len(bin_data)/1024:.2f} KB)")
+    return bin_data
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Conversor de imágenes a BIN para WeAct ESP32-P4 LCD 3.5\" (480x320)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Ejemplos:
+  python3 weact_lcd_converter.py mi_imagen.png output.bin
+  python3 weact_lcd_converter.py --default boot_screen.bin
+  python3 weact_lcd_converter.py foto.jpg --width 480 --height 320
+        """
+    )
+    
+    parser.add_argument("input", nargs="?", help="Imagen de entrada (PNG/JPG)")
+    parser.add_argument("output", nargs="?", help="Archivo BIN de salida")
+    parser.add_argument("--default", action="store_true", help="Generar imagen de prueba")
+    parser.add_argument("--width", type=int, default=LCD_WIDTH, help=f"Ancho (default {LCD_WIDTH})")
+    parser.add_argument("--height", type=int, default=LCD_HEIGHT, help=f"Alto (default {LCD_HEIGHT})")
+    
+    args = parser.parse_args()
+    
+    if not args.output:
+        print("[ERROR] Debes especificar archivo de salida")
+        parser.print_help()
+        sys.exit(1)
+    
+    if args.default or not args.input:
+        generate_default_image(args.output, args.width, args.height)
+    else:
+        convert_image_to_bin(args.input, args.output, args.width, args.height)
+
+
+if __name__ == "__main__":
+    main()
